@@ -78,3 +78,7 @@ trade_scrape<-function(startyr,endyr = 2017) {
 ###To get trades from 2006-2016
 Trades <- trade_scrape(2006,2016)
 
+###To add Jimmy Johnson Valuation Chart to the picks
+trade_value <- read.csv("Draft Value Johnson.csv")
+Trades <- Trades %>% left_join(trade_value, by = c("Picks_Traded" = "Pick"))
+
