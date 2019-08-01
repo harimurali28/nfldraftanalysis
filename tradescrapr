@@ -1,84 +1,59 @@
-trade_scrape<-function(startyr,endyr = 2017) {
-  master <- data.frame()
-  for(i in startyr:endyr) {
-    
-    ##### Url to scrape from, i is year so multiple years can be scrapped
-    url <- paste0("https://www.spotrac.com/nfl/transactions/",i,"/trade/")
-    
-    #Reading the HTML code from the website
-    webpage <- read_html(url)
-    ###First Getting logo x_nodes so I can match specific team to each trade
-    #Using CSS selectors to scrape the rankings section
-    trade_data_html <- html_nodes(webpage,'.tradelogo')
-    
-    
-    #Using CSS selectors to scrape the rankings section
-    trade_team_html <- html_nodes(webpage,'.tradedata')
-    
-    #Converting the ranking data to text
-    trade_team <- html_text(trade_team_html)
-    
-    #Let's have a look at the rankings
-    head(trade_team)
-    
-    #### Pull trade details into a data frame have to do this first so can combine logo df to get team abbreviations
-    trade_tracker <- data.frame(Team = substr(trade_team, 1, 5), Trade = substring(trade_team, regexpr("acquires", trade_team) + 8), Year = i)
-    
-    #### building data frame from logo attributes
-    trade_data <- trade_data_html %>% 
-      map(xml_attrs) %>% 
-      map_df(~as.list(.))
-    
-    ###getting rid of similar pattern on attribute and keeping unique indentifier and 4 letter of it
-    trade_data <- trade_data %>% mutate(Team_html = substr(str_remove(src, "https://d1dglpr230r57l.cloudfront.net/images/thumb/"),1,4))
-    
-    
-    ####combining logo data on main data frame
-    trade_tracker <- trade_tracker %>% cbind(trade_data[,c(4)])
-    
-    ####cleaning up trade data now
-    trade_tracker <- trade_tracker %>%  mutate(Trade_picks =gsub("[\\(\\)]", "", regmatches(Trade, gregexpr("\\(.*?\\)", Trade))),
-                                               Trade_id = ifelse(Year == 2015 & row_number() > 25, paste0(ceiling((row_number()-1)/2),Year), paste0(ceiling(row_number()/2),Year)))  %>% 
-      select(Trade_id, everything()) 
-    trade_tracker$Trade <- as.character(trade_tracker$Trade)
-    trade_tracker$Trade_picks <- ifelse(startsWith(trade_tracker$Trade_picks, "$") | startsWith(trade_tracker$Trade_picks, "character0"),NA,trade_tracker$Trade_picks)
-    trade_tracker <- trade_tracker %>% mutate(Player_Traded = ifelse(grepl("^[0-9]", Trade),NA,gsub("\\(.*","",Trade)),
-                                              Picks_Traded = str_extract_all(trade_tracker$Trade_picks, "\\#[[:digit:]]{1,}"))
-    trade_tracker_join <- trade_tracker %>% unnest(Picks_Traded) %>% select(c("Trade_id", "Team", "Picks_Traded"))
-    
-    
-    trade_tracker <-left_join(trade_tracker, trade_tracker_join, by = c("Trade_id","Team"))
-    trade_tracker <- trade_tracker[,c(1:7,9)] 
-    colnames(trade_tracker)[8] <- "Picks_Traded"
-    
-    trade_tracker$Player_Traded <- str_extract(trade_tracker$Player_Traded, "[^\\d]+")
-    trade_tracker$Player_Traded <-gsub("([[:lower:]][[:lower:]])([[:upper:]][[:lower:]])", "\\1, \\2",trade_tracker$Player_Traded)
-    master %<>%
-      bind_rows(trade_tracker)
-    
-  }
-  #### builds dataframe with abbreviatiopns for ease of use with other scrapers I have Made
-  scrape_abrv <- c("ariz","falc","rave","buff","pant","bear","beng","brow","dall","bron","lion","pack","texa","colt","jagu","kans","dolp","viki",
-                   "patr","newo","nygi","jets","oakl","eagl","Pitt","rams","char","49er","hawk","bucs","tenn","wash","NFL_","rams")
+Numextractmult <- function(string){
+  regmatches(string,gregexpr("[[:digit:]]+\\.*[[:digit:]]*",string))
+}
+
+library(lubridate)
+library(rvest)
+library(stringr)
+library(tidyverse)
+library(magrittr)
+
+trade_scrape_pf <- function(startyr,endyr) {
   
-  team_abrv <- c("ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GNB","HOU","IND","JAX","KAN",
-                 "MIA","MIN","NWE","NOR","NYG","NYJ","OAK","PHI","PIT","LAR","LAC","SFO","SEA","TAM","TEN","WAS","LAC","LAR")
-  trade_abrv <- data.frame(scrape_team = scrape_abrv, abrv = team_abrv)
-  ###Joing dataframe with abbreviations
-  master <- master %>% left_join(trade_abrv, by = c("Team_html" = "scrape_team"))
-  master <- subset(master, select=c(Trade_id,abrv,Team:Picks_Traded))
-  ###GEtting rid of two other team identifier
-  master <- master %>% select(-c(3,6))
-  master$Picks_Traded <- as.numeric(str_sub(master$Picks_Traded,2))
-  return(master)
+
+##### Pulling table
+url <- paste0("https://www.pro-football-reference.com/play-index/trade_finder.cgi?request=1&year_min=",startyr,"&year_max=",endyr,"&pos%5B%5D=qb&pos%5B%5D=rb&pos%5B%5D=wr&pos%5B%5D=te&pos%5B%5D=e&pos%5B%5D=t&pos%5B%5D=g&pos%5B%5D=c&pos%5B%5D=ol&pos%5B%5D=dt&pos%5B%5D=de&pos%5B%5D=dl&pos%5B%5D=ilb&pos%5B%5D=olb&pos%5B%5D=lb&pos%5B%5D=cb&pos%5B%5D=s&pos%5B%5D=db&pos%5B%5D=k&pos%5B%5D=p&draft_pick_min=1&draft_pick_max=256&order_by=trans_date")
+trade_pf = getURL(url)
+trade_pf = readHTMLTable(trade_pf,stringsAsFactors = F)[[1]]
+###Chaning Date into date type to be able to pull different parts
+trade_pf$Date = lubridate::mdy(trade_pf$Date)
+trade_pf$Year = lubridate::year(trade_pf$Date)  
+###Have to rename to create trade_id
+colnames(trade_pf)[4] <- "AV.From"
+colnames(trade_pf)[7] <- "AV.To"
+trade_pf <- trade_pf %>% mutate(trade_id = paste0(row_number(),trade_pf$Year)) %>% select(trade_id, everything())
+#####Creating two data frames to stack allowing per team rows
+trade_pf_a <- trade_pf %>% select(c(1:2,4:6,9))
+colnames(trade_pf_a)[4] <- "AV"
+colnames(trade_pf_a)[5] <- "Team"
+colnames(trade_pf_a)[3] <- "Received"
+trade_pf_a <- trade_pf_a %>% select(trade_id,Date,Year,Team,Received,AV)
+trade_pf_b <- trade_pf %>% select(c(1:3,7:9))
+colnames(trade_pf_b)[5] <- "AV"
+colnames(trade_pf_b)[3] <- "Team"
+trade_pf_b <- trade_pf_b %>% select(trade_id,Date,Year,Team,Received,AV)
+####### Stacking rows back into a trade df
+trade_pf <- rbind(trade_pf_a,trade_pf_b) %>% arrange(desc(Date),trade_id)
+###Using Stringr to extract pick numbers and player names
+trade_pf <- trade_pf %>% mutate(Trade_picks =gsub("[\\(\\)]", "", regmatches(Received, gregexpr("\\(.*?\\)", Received)))) 
+trade_pf$Trade_picks <- ifelse(startsWith(trade_pf$Trade_picks, "$") | startsWith(trade_pf$Trade_picks, "character0"),NA,trade_pf$Trade_picks)
+trade_pf <- trade_pf %>% mutate(Player_Received = ifelse(grepl("^[0-9]", Received),NA,gsub("\\(.*","",Received)),
+                                          Picks_Traded = Numextractmult(trade_pf$Trade_picks))
+##### When extracting the picks, a list is created and in order to unnest it and keep player names we must join the data back on itself
+##### Therefore Ive created a seperate DF to join back on
+trade_pf_join <- trade_pf %>% unnest(Picks_Traded) %>% select(c("trade_id", "Team", "Picks_Traded"))
+
+trade_pf <-left_join(trade_pf, trade_pf_join, by = c("trade_id","Team"))
+trade_pf <- trade_pf %>% select(c(1:8,10))
+### Renaming joined column
+colnames(trade_pf)[9] <- "Picks Received"
+
+##### Extracting conditional string away from player names
+trade_pf$Future_Conditional_Picks <- ifelse(str_detect(trade_pf$Player_Received,"a.+pick") == TRUE, str_extract_all(trade_pf$Player_Received, "a.+pick"), NA)
+trade_pf$Player_Received <- str_remove(trade_pf$Player_Received, "a.+pick")
+trade_pf <- trade_pf %>% unnest(Future_Conditional_Picks)
+return(trade_pf)
 }
 
 
-#######Example
-###To get trades from 2006-2016
-Trades <- trade_scrape(2006,2016)
-
-###To add Jimmy Johnson Valuation Chart to the picks
-trade_value <- read.csv("Draft Value Johnson.csv")
-Trades <- Trades %>% left_join(trade_value, by = c("Picks_Traded" = "Pick"))
 
