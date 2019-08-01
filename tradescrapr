@@ -55,5 +55,10 @@ trade_pf <- trade_pf %>% unnest(Future_Conditional_Picks)
 return(trade_pf)
 }
 
+###Example
+###Returns all trades from 2015-2019
+
+Trade_scrape <- trade_scrape_pf(startyr = 2015, endyr = 2019)
+
 
 
